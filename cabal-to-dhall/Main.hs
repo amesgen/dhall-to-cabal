@@ -54,6 +54,7 @@ printVersionParser =
     )
 
 
+optionsParser :: OptParse.ParserInfo Command
 optionsParser = OptParse.info ( parser <**> OptParse.helper ) mempty
   where
     parser =

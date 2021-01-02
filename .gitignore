@@ -6,3 +6,4 @@ dist-newstyle/
 .stack-work/
 .ghc.environment.*
 stack.yaml.lock
+.dir-locals.el

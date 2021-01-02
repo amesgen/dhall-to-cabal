@@ -17,7 +17,7 @@ import qualified Dhall.Core as Expr ( Expr(..) )
 import qualified Dhall.Map as Map
 
 
-validateType :: Dhall.Type ( Maybe a ) -> Dhall.Type a
+validateType :: Dhall.Decoder ( Maybe a ) -> Dhall.Decoder a
 validateType a =
   a { Dhall.extract =
         \expr ->

@@ -12,6 +12,8 @@ module DhallToCabal.FactorType
   )
   where
 
+import qualified Data.Either.Validation as DEV
+
 import Control.Monad ( guard )
 import Data.Foldable ( foldl' )
 import Data.Maybe ( fromMaybe )
@@ -21,8 +23,6 @@ import Dhall.Optics ( transformOf )
 import Lens.Micro ( over )
 
 import DhallToCabal
-import Dhall.Extra
-  ( sortExpr )
 
 import qualified Data.Map as UnorderedMap
 import qualified Dhall
@@ -31,6 +31,11 @@ import qualified Dhall.Core as Expr ( Expr(..), Var(..), Binding(..) )
 import qualified Dhall.Map as Map
 import qualified Dhall.Parser
 
+-- TODO
+extractValidation :: Show e => DEV.Validation e a -> a
+extractValidation = \case
+  DEV.Success a -> a
+  DEV.Failure e -> error $ show e
 
 -- Note: this needs to be in topological order of CSEability, from
 -- big to small.
@@ -86,42 +91,42 @@ isCandidateSubrecord _ = False
 dhallType :: KnownType -> Dhall.Expr Dhall.Parser.Src a
 dhallType t = fmap absurd
   ( case t of
-      Config -> configRecordType
-      Library -> Dhall.expected library
-      ForeignLibrary -> Dhall.expected foreignLib
-      Executable -> Dhall.expected executable
-      Benchmark -> Dhall.expected benchmark
-      TestSuite -> Dhall.expected testSuite
-      SetupBuildInfo -> Dhall.expected setupBuildInfo
+      Config -> configRecordDecoder
+      Library -> extractValidation $ Dhall.expected library
+      ForeignLibrary -> extractValidation $ Dhall.expected foreignLib
+      Executable -> extractValidation $ Dhall.expected executable
+      Benchmark -> extractValidation $ Dhall.expected benchmark
+      TestSuite -> extractValidation $ Dhall.expected testSuite
+      SetupBuildInfo -> extractValidation $ Dhall.expected setupBuildInfo
       BuildInfo -> buildInfoType
-      SourceRepo -> Dhall.expected sourceRepo
-      RepoType -> Dhall.expected repoType
-      RepoKind -> Dhall.expected repoKind
-      Compiler -> Dhall.expected compilerFlavor
-      OS -> Dhall.expected operatingSystem
-      Extension -> Dhall.expected extension
-      CompilerOptions -> Dhall.expected compilerOptions
-      Arch -> Dhall.expected arch
-      Language -> Dhall.expected language
-      License -> Dhall.expected license
-      BuildType -> Dhall.expected buildType
-      Package -> Dhall.expected genericPackageDescription
-      Dependency -> Dhall.expected dependency
-      VersionRange -> Dhall.expected versionRange
-      Version -> Dhall.expected version
-      SPDX -> Dhall.expected spdxLicense
-      LicenseId -> Dhall.expected spdxLicenseId
-      LicenseExceptionId -> Dhall.expected spdxLicenseExceptionId
-      Scope -> Dhall.expected executableScope
-      Mixin -> Dhall.expected mixin
-      ModuleRenaming -> Dhall.expected moduleRenaming
-      ForeignLibOption -> Dhall.expected foreignLibOption
-      ForeignLibType -> Dhall.expected foreignLibType
-      TestType -> Dhall.expected testSuiteInterface
-      Flag -> Dhall.expected flag
-      PkgconfigVersionRange -> Dhall.expected pkgconfigVersionRange
-      LibraryName -> Dhall.expected libraryName
-      LibraryVisibility -> Dhall.expected libraryVisibility
+      SourceRepo -> extractValidation $ Dhall.expected sourceRepo
+      RepoType -> extractValidation $ Dhall.expected repoType
+      RepoKind -> extractValidation $ Dhall.expected repoKind
+      Compiler -> extractValidation $ Dhall.expected compilerFlavor
+      OS -> extractValidation $ Dhall.expected operatingSystem
+      Extension -> extractValidation $ Dhall.expected extension
+      CompilerOptions -> extractValidation $ Dhall.expected compilerOptions
+      Arch -> extractValidation $ Dhall.expected arch
+      Language -> extractValidation $ Dhall.expected language
+      License -> extractValidation $ Dhall.expected license
+      BuildType -> extractValidation $ Dhall.expected buildType
+      Package -> extractValidation $ Dhall.expected genericPackageDescription
+      Dependency -> extractValidation $ Dhall.expected dependency
+      VersionRange -> extractValidation $ Dhall.expected versionRange
+      Version -> extractValidation $ Dhall.expected version
+      SPDX -> extractValidation $ Dhall.expected spdxLicense
+      LicenseId -> extractValidation $ Dhall.expected spdxLicenseId
+      LicenseExceptionId -> extractValidation $ Dhall.expected spdxLicenseExceptionId
+      Scope -> extractValidation $ Dhall.expected executableScope
+      Mixin -> extractValidation $ Dhall.expected mixin
+      ModuleRenaming -> extractValidation $ Dhall.expected moduleRenaming
+      ForeignLibOption -> extractValidation $ Dhall.expected foreignLibOption
+      ForeignLibType -> extractValidation $ Dhall.expected foreignLibType
+      TestType -> extractValidation $ Dhall.expected testSuiteInterface
+      Flag -> extractValidation $ Dhall.expected flag
+      PkgconfigVersionRange -> extractValidation $ Dhall.expected pkgconfigVersionRange
+      LibraryName -> extractValidation $ Dhall.expected libraryName
+      LibraryVisibility -> extractValidation $ Dhall.expected libraryVisibility
   )
 
 
@@ -208,24 +213,24 @@ subtractRecordFields a b = do
 -- | Map over the embedded values in the `Expr`, with access to a
 -- function to get the outermost variable with a given name.
 mapWithBindings
-  :: ( ( Text -> Expr.Var ) -> a -> b )
+  :: forall s a b. ( ( Text -> Expr.Var ) -> a -> b )
   -> Expr.Expr s a
   -> Expr.Expr s b
 mapWithBindings f =
   go UnorderedMap.empty
 
   where
-
     outermostVar bindings n =
       Expr.V n ( fromMaybe 0 ( UnorderedMap.lookup n bindings ) )
 
     shiftName =
       UnorderedMap.alter ( Just . succ . fromMaybe 0 )
 
+    go :: UnorderedMap.Map Text Int -> Expr.Expr s a -> Expr.Expr s b
     go bindings = \case
-      Expr.Lam n t b ->
-        Expr.Lam n
-          ( go bindings t )
+      Expr.Lam (Dhall.FunctionBinding _ n _ _ t) b ->
+        Expr.Lam
+          ( Dhall.makeFunctionBinding n (go bindings t) )
           ( go ( shiftName n bindings ) b )
 
       Expr.Pi n t b ->
@@ -266,11 +271,16 @@ mapWithBindings f =
       Expr.ListAppend a b ->
         Expr.ListAppend ( go bindings a ) ( go bindings b )
 
-      Expr.Combine a b ->
-        Expr.Combine ( go bindings a ) ( go bindings b )
+      Expr.Combine isDesugared a b ->
+        Expr.Combine isDesugared ( go bindings a ) ( go bindings b )
 
-      Expr.Prefer a b ->
-        Expr.Prefer ( go bindings a ) ( go bindings b )
+      -- TODO is this correct?
+      Expr.Prefer ann a b ->
+        let modfromwith = \case
+              Dhall.PreferFromWith e -> Dhall.PreferFromWith $ go bindings e
+              Dhall.PreferFromSource -> Dhall.PreferFromSource
+              Dhall.PreferFromCompletion -> Dhall.PreferFromCompletion
+        in Expr.Prefer (modfromwith ann) ( go bindings a ) ( go bindings b )
 
       Expr.TextAppend a b ->
         Expr.TextAppend ( go bindings a ) ( go bindings b )
@@ -287,10 +297,14 @@ mapWithBindings f =
         Expr.None
 
       Expr.Record fields ->
-        Expr.Record ( fmap ( go bindings ) fields )
+        -- TODO use lens
+        let modval f rf = rf { Dhall.recordFieldValue = f $ Dhall.recordFieldValue rf }
+         in Expr.Record ( fmap (modval ( go bindings )) fields )
 
       Expr.RecordLit fields ->
-        Expr.RecordLit ( fmap ( go bindings ) fields )
+        -- TODO use lens
+        let modval f rf = rf { Dhall.recordFieldValue = f $ Dhall.recordFieldValue rf }
+         in Expr.RecordLit ( fmap (modval( go bindings )) fields )
 
       Expr.Union fields ->
         Expr.Union ( fmap ( fmap ( go bindings ) ) fields )
@@ -421,12 +435,6 @@ mapWithBindings f =
       Expr.Optional ->
         Expr.Optional
 
-      Expr.OptionalFold ->
-        Expr.OptionalFold
-
-      Expr.OptionalBuild ->
-        Expr.OptionalBuild
-
       Expr.Assert a ->
         Expr.Assert
           ( go bindings a )
@@ -435,3 +443,4 @@ mapWithBindings f =
         Expr.Equivalent
           ( go bindings a )
           ( go bindings b )
+-- TODO missing cases

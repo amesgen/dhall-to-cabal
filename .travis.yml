@@ -1,4 +1,0 @@
-language: nix
-sudo: false
-
-script: travis_wait 20 nix-build ./shell.nix

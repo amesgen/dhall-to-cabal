@@ -1,11 +1,11 @@
 {-# language DeriveFunctor #-}
 {-# language LambdaCase #-}
 {-# language OverloadedStrings #-}
+{-# language FlexibleContexts #-}
 
 module DhallToCabal.ConfigTree ( ConfigTree(..), toConfigTree ) where
 
 import Control.Monad
-import Data.Semigroup ( Semigroup ( (<>) ) )
 import Dhall.Core hiding ( Const )
 import Dhall.Optics ( transformMOf )
 
@@ -83,8 +83,8 @@ rewriteConfigUse v =
 
   where
 
-    isConfigUse (App (Field (Var x') "os") _)           | v == x' = True
-    isConfigUse (App (Field (Var x') "arch") _)         | v == x' = True
-    isConfigUse (App (App (Field (Var x') "impl") _) _) | v == x' = True
-    isConfigUse (App (Field (Var x') "flag") _)         | v == x' = True
+    isConfigUse (App (Field (Var x') (FieldSelection _ "os" _)) _)           | v == x' = True
+    isConfigUse (App (Field (Var x') (FieldSelection _ "arch" _)) _)         | v == x' = True
+    isConfigUse (App (App (Field (Var x') (FieldSelection _ "impl" _)) _) _) | v == x' = True
+    isConfigUse (App (Field (Var x') (FieldSelection _ "field" _)) _)         | v == x' = True
     isConfigUse _ = False
